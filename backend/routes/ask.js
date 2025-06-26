@@ -15,6 +15,7 @@ function isFollowUp(message) {
 }
 
 router.post('/', async (req, res) => {
+  const totalStart = Date.now();
   try {
     const query = req.body.question;
     const history = req.body.history || [];
@@ -22,18 +23,19 @@ router.post('/', async (req, res) => {
     if (isFollowUp(query)) {
       const systemMessage = {
         role: 'system',
-        content: `You are TradeGPT, a trade-specific assistant for Indian export-import, logistics, and compliance.\nYou only answer questions about: exports/imports, DGFT schemes, customs, GST, shipping, trade compliance, licensing, and trade agreements.\nFor any non-trade questions, respond: \"I'm a trade-specific assistant and cannot process queries outside trade, export, import, logistics, or compliance-related topics.\"\nWhen answering, be detailed and thorough. Provide comprehensive explanations and examples where possible.`
+        content: `You are TradeGPT, a trade-specific assistant for Indian export-import, logistics, and compliance.\nUse the previous conversation context to elaborate or clarify as requested by the user.`
       };
       let messagesArr = [systemMessage];
-      if (history.length > 0) {
-        history.forEach(msg => {
-          if (msg.role === 'user' || msg.role === 'assistant') {
-            messagesArr.push({ role: msg.role, content: msg.content });
-          }
-        });
-      } else {
-        messagesArr.push({ role: 'user', content: query });
+      // Add the last user and assistant messages, if available
+      if (history.length >= 2) {
+        const lastUser = history[history.length - 2];
+        const lastAssistant = history[history.length - 1];
+        if (lastUser.role === 'user') messagesArr.push({ role: 'user', content: lastUser.content });
+        if (lastAssistant.role === 'assistant') messagesArr.push({ role: 'assistant', content: lastAssistant.content });
       }
+      // Add the follow-up as the latest user message
+      messagesArr.push({ role: 'user', content: query });
+      const aiStart = Date.now();
       const response = await axios.post(
         'https://api.mistral.ai/v1/chat/completions',
         {
@@ -49,6 +51,8 @@ router.post('/', async (req, res) => {
           }
         }
       );
+      console.log(`[TIMING] AI call (follow-up) took ${Date.now() - aiStart}ms`);
+      console.log(`[TIMING] Total request took ${Date.now() - totalStart}ms`);
       return res.json({
         answer: response.data.choices[0].message.content,
         source: 'mistral',
@@ -56,15 +60,47 @@ router.post('/', async (req, res) => {
       });
     }
 
+    const embedStart = Date.now();
     const queryEmbedding = await getEmbedding(query);
-    const examples = await Example.find({});
+    console.log(`[TIMING] Embedding generation took ${Date.now() - embedStart}ms`);
+
+    const dbStart = Date.now();
+    // Use MongoDB Atlas Vector Search to fetch top 3 most similar examples
+    const pipeline = [
+      {
+        $vectorSearch: {
+          index: 'vector', // Name of your vector index
+          path: 'embedding',
+          queryVector: queryEmbedding,
+          numCandidates: 100,
+          limit: 3,
+          similarity: 'cosine'
+        }
+      },
+      {
+        $project: {
+          question: 1,
+          answer: 1,
+          embedding: 1,
+          similarity: { $meta: 'vectorSearchScore' }
+        }
+      }
+    ];
+    const examples = await Example.aggregate(pipeline);
+    console.log(`[TIMING] Vector search took ${Date.now() - dbStart}ms (fetched ${examples.length} records)`);
+
+    const simStart = Date.now();
+    // Use the similarity score from vector search
     const scored = examples.map(ex => ({
       question: ex.question,
       answer: ex.answer,
-      similarity: cosineSimilarity(queryEmbedding, ex.embedding)
+      similarity: ex.similarity
     }));
     const bestMatch = scored.sort((a, b) => b.similarity - a.similarity)[0];
+    console.log(`[TIMING] Similarity calculation took ${Date.now() - simStart}ms`);
+
     if (bestMatch && bestMatch.similarity >= SIMILARITY_THRESHOLD) {
+      console.log(`[TIMING] Total request took ${Date.now() - totalStart}ms`);
       return res.json({
         answer: bestMatch.answer,
         source: 'database',
@@ -73,6 +109,7 @@ router.post('/', async (req, res) => {
       });
     }
 
+    const aiStart = Date.now();
     const systemMessage = {
       role: 'system',
       content: `You are TradeGPT, a trade-specific assistant for Indian export-import, logistics, and compliance.\nYou only answer questions about: exports/imports, DGFT schemes, customs, GST, shipping, trade compliance, licensing, and trade agreements.\nFor any non-trade questions, respond: \"I'm a trade-specific assistant and cannot process queries outside trade, export, import, logistics, or compliance-related topics.\"\nWhen answering, be detailed and thorough. Provide comprehensive explanations and examples where possible.`
@@ -102,6 +139,8 @@ router.post('/', async (req, res) => {
         }
       }
     );
+    console.log(`[TIMING] AI call took ${Date.now() - aiStart}ms`);
+    console.log(`[TIMING] Total request took ${Date.now() - totalStart}ms`);
     return res.json({
       answer: response.data.choices[0].message.content,
       source: 'mistral',
@@ -110,7 +149,7 @@ router.post('/', async (req, res) => {
 
   } catch (err) {
     console.error(err);
-    res.status(500).send('Something went wrong');
+    res.status(500).json({ error: 'Something went wrong' });
   }
 });
 

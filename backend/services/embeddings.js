@@ -3,14 +3,19 @@ const use = require('@tensorflow-models/universal-sentence-encoder');
 
 let model = null;
 
-async function loadUSE() {
-  if (!model) model = await use.load();
-  return model;
-}
+// Pre-load the model at server startup
+(async () => {
+  console.log('[EMBEDDINGS] Loading Universal Sentence Encoder model...');
+  model = await use.load();
+  console.log('[EMBEDDINGS] Model loaded!');
+})();
 
 async function getEmbedding(text) {
-  const useModel = await loadUSE();
-  const embeddings = await useModel.embed([text]);
+  // Wait until the model is loaded
+  while (!model) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  const embeddings = await model.embed([text]);
   const vector = embeddings.arraySync()[0];
   return vector;
 }
