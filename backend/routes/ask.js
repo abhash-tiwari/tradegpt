@@ -23,38 +23,57 @@ router.post('/', async (req, res) => {
     if (isFollowUp(query)) {
       const systemMessage = {
         role: 'system',
-        content: `You are TradeGPT, a trade-specific assistant for Indian export-import, logistics, and compliance.\nUse the previous conversation context to elaborate or clarify as requested by the user.`
+        content: `You are TradeGPT, a trade-specific assistant for Indian export-import, logistics, and compliance.\nWhen the user asks a follow-up like 'elaborate' or 'explain more', do NOT repeat generic introductions or overviews. Instead, immediately expand on your previous answer with new details, examples, or step-by-step guides. Avoid repeating phrases like 'I can provide detailed information...' or listing broad topic areas unless specifically asked.`
       };
       let messagesArr = [systemMessage];
-      // Add the last user and assistant messages, if available
+      let followUpContent = query;
       if (history.length >= 2) {
         const lastUser = history[history.length - 2];
         const lastAssistant = history[history.length - 1];
         if (lastUser.role === 'user') messagesArr.push({ role: 'user', content: lastUser.content });
         if (lastAssistant.role === 'assistant') messagesArr.push({ role: 'assistant', content: lastAssistant.content });
-      }
-      // Add the follow-up as the latest user message
-      messagesArr.push({ role: 'user', content: query });
-      const aiStart = Date.now();
-      const response = await axios.post(
-        'https://api.mistral.ai/v1/chat/completions',
-        {
-          model: 'mistral-large-latest',
-          messages: messagesArr,
-          temperature: 0.3,
-          max_tokens: 1024
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.MISTRAL_API_KEY}`,
-            'Content-Type': 'application/json'
-          }
+        const shortFollowUps = ['elaborate', 'explain', 'why', 'how', 'give example', 'what do you mean', 'clarify', 'expand', 'tell me more', 'more details', 'can you', 'could you', 'please expand', 'please explain', 'continue', 'go on', 'further', 'in detail', 'specify', 'such as', 'like what', 'for instance', 'for example'];
+        if (shortFollowUps.includes(query.trim().toLowerCase())) {
+          followUpContent = `Please elaborate on your previous answer about: "${lastUser.content}"`;
         }
-      );
+      }
+      messagesArr.push({ role: 'user', content: followUpContent });
+      const aiStart = Date.now();
+      let aiResponse;
+      try {
+        const response = await axios.post(
+          'https://api.mistral.ai/v1/chat/completions',
+          {
+            model: 'mistral-large-latest',
+            messages: messagesArr,
+            temperature: 0.3,
+            max_tokens: 1024
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${process.env.MISTRAL_API_KEY}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+        aiResponse = response.data.choices[0].message.content;
+      } catch (apiErr) {
+        console.error('AI API call failed:', apiErr);
+        return res.status(503).json({ error: 'AI service unavailable. Please try again later.' });
+      }
+      // Post-process to remove generic phrases from the start
+      const genericPhrases = [
+        /^I can provide detailed information on various aspects of Indian export-import, logistics, and compliance\. Here are some key areas with elaborate explanations:?\s*/i,
+        /^Of course! I'm here to help with any questions or topics related to Indian export-import, logistics, and compliance\.\s*/i,
+        /^Let's dive deeper into the key aspects of Indian export-import processes, logistics, and compliance\.\s*/i
+      ];
+      for (const regex of genericPhrases) {
+        aiResponse = aiResponse.replace(regex, '');
+      }
       console.log(`[TIMING] AI call (follow-up) took ${Date.now() - aiStart}ms`);
       console.log(`[TIMING] Total request took ${Date.now() - totalStart}ms`);
       return res.json({
-        answer: response.data.choices[0].message.content,
+        answer: aiResponse.trim(),
         source: 'mistral',
         confidence: 0
       });

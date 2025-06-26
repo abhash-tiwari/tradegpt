@@ -18,7 +18,7 @@ function ChatPage() {
     setIsLoading(true);
 
     try {
-      const response = await fetch('https://tradegpt-backend.onrender.com/ask', {
+      const response = await fetch('http://localhost:5000/ask', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
