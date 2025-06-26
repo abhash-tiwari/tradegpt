@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
 import '../styles/ChatPage.css';
 
 function ChatPage() {
@@ -75,7 +76,11 @@ function ChatPage() {
             className={`message ${message.role}`}
           >
             <div className="message-content">
-              {message.content}
+              {message.role === 'assistant' ? (
+                <ReactMarkdown>{message.content}</ReactMarkdown>
+              ) : (
+                message.content
+              )}
             </div>
           </div>
         ))}
