@@ -23,35 +23,49 @@ router.post('/', async (req, res) => {
     if (isFollowUp(query)) {
       const systemMessage = {
         role: 'system',
-        content: `You are TradeGPT, a trade-specific assistant for Indian export-import, logistics, and compliance.\nWhen the user asks a follow-up like 'elaborate' or 'explain more', do NOT repeat generic introductions or overviews. Instead, immediately expand on your previous answer with new details, examples, or step-by-step guides. Avoid repeating phrases like 'I can provide detailed information...' or listing broad topic areas unless specifically asked.`
+        content: `You are TradeGPT, a trade-specific assistant for Indian export-import, logistics, and compliance.\nWhen the user asks a follow-up like 'elaborate' or 'explain more', always provide a detailed, relevant answer, even if the previous answer was short or general. If the previous answer is brief, give a comprehensive overview of the topic, including definitions, benefits, challenges, and examples. Do not ask the user for clarification unless absolutely necessary.`
       };
       let messagesArr = [systemMessage];
       let followUpContent = query;
-      if (history.length >= 2) {
-        const lastUser = history[history.length - 2];
-        const lastAssistant = history[history.length - 1];
-        if (lastUser.role === 'user') messagesArr.push({ role: 'user', content: lastUser.content });
-        if (lastAssistant.role === 'assistant') messagesArr.push({ role: 'assistant', content: lastAssistant.content });
-        const shortFollowUps = ['elaborate', 'explain', 'why', 'how', 'give example', 'what do you mean', 'clarify', 'expand', 'tell me more', 'more details', 'can you', 'could you', 'please expand', 'please explain', 'continue', 'go on', 'further', 'in detail', 'specify', 'such as', 'like what', 'for instance', 'for example'];
-        if (shortFollowUps.includes(query.trim().toLowerCase())) {
-          followUpContent = `Please elaborate on your previous answer about: "${lastUser.content}"`;
+      const shortFollowUps = ['elaborate', 'explain', 'why', 'how', 'give example', 'what do you mean', 'clarify', 'expand', 'tell me more', 'more details', 'can you', 'could you', 'please expand', 'please explain', 'continue', 'go on', 'further', 'in detail', 'specify', 'such as', 'like what', 'for instance', 'for example'];
+      if (shortFollowUps.includes(query.trim().toLowerCase())) {
+        if (history.length >= 2) {
+          const lastUser = history[history.length - 2];
+          const lastAssistant = history[history.length - 1];
+          if (lastUser.role === 'user') messagesArr.push({ role: 'user', content: lastUser.content });
+          if (lastAssistant.role === 'assistant') messagesArr.push({ role: 'assistant', content: lastAssistant.content });
+          if (lastAssistant.content.split(/\s+/).length < 30) {
+            followUpContent = `Give a comprehensive, textbook-level explanation of ${lastUser.content}, including definition, benefits, challenges, and real-world examples. Do not ask for clarification.`;
+          } else {
+            followUpContent = `${query.trim()} ${lastAssistant.content}`;
+          }
+        } else if (history.length === 1) {
+          const lastUser = history[0];
+          if (lastUser.role === 'user') messagesArr.push({ role: 'user', content: lastUser.content });
+          followUpContent = `Give a comprehensive, textbook-level explanation of ${lastUser.content}, including definition, benefits, challenges, and real-world examples. Do not ask for clarification.`;
+        } else if (req.body.lastAssistantAnswer) {
+          followUpContent = `Give a comprehensive, textbook-level explanation of ${req.body.lastAssistantAnswer}, including definition, benefits, challenges, and real-world examples. Do not ask for clarification.`;
+        } else {
+          followUpContent = `Give a comprehensive, textbook-level explanation of ${req.body.question}, including definition, benefits, challenges, and real-world examples. Do not ask for clarification.`;
         }
       }
       messagesArr.push({ role: 'user', content: followUpContent });
+      // Log the message array sent to OpenAI
+      console.log('Sending to OpenAI:', JSON.stringify(messagesArr, null, 2));
       const aiStart = Date.now();
       let aiResponse;
       try {
         const response = await axios.post(
-          'https://api.mistral.ai/v1/chat/completions',
+          'https://api.openai.com/v1/chat/completions',
           {
-            model: 'mistral-large-latest',
+            model: 'gpt-4',
             messages: messagesArr,
             temperature: 0.3,
             max_tokens: 1024
           },
           {
             headers: {
-              Authorization: `Bearer ${process.env.MISTRAL_API_KEY}`,
+              Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
               'Content-Type': 'application/json'
             }
           }
@@ -63,7 +77,7 @@ router.post('/', async (req, res) => {
       }
       // Post-process to remove generic phrases from the start
       const genericPhrases = [
-        /^I can provide detailed information on various aspects of Indian export-import, logistics, and compliance\. Here are some key areas with elaborate explanations:?\s*/i,
+        /^I can provide detailed information on various aspects of Indian export-import, logistics, and compliance\.\s*/i,
         /^Of course! I'm here to help with any questions or topics related to Indian export-import, logistics, and compliance\.\s*/i,
         /^Let's dive deeper into the key aspects of Indian export-import processes, logistics, and compliance\.\s*/i
       ];
@@ -74,7 +88,7 @@ router.post('/', async (req, res) => {
       console.log(`[TIMING] Total request took ${Date.now() - totalStart}ms`);
       return res.json({
         answer: aiResponse.trim(),
-        source: 'mistral',
+        source: 'gpt-4',
         confidence: 0
       });
     }
@@ -143,26 +157,33 @@ router.post('/', async (req, res) => {
     } else {
       messagesArr.push({ role: 'user', content: query });
     }
-    const response = await axios.post(
-      'https://api.mistral.ai/v1/chat/completions',
-      {
-        model: 'mistral-large-latest',
-        messages: messagesArr,
-        temperature: 0.3,
-        max_tokens: 512
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.MISTRAL_API_KEY}`,
-          'Content-Type': 'application/json'
+    let aiResponse;
+    try {
+      const response = await axios.post(
+        'https://api.openai.com/v1/chat/completions',
+        {
+          model: 'gpt-4',
+          messages: messagesArr,
+          temperature: 0.3,
+          max_tokens: 512
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+            'Content-Type': 'application/json'
+          }
         }
-      }
-    );
+      );
+      aiResponse = response.data.choices[0].message.content;
+    } catch (apiErr) {
+      console.error('AI API call failed:', apiErr);
+      return res.status(503).json({ error: 'AI service unavailable. Please try again later.' });
+    }
     console.log(`[TIMING] AI call took ${Date.now() - aiStart}ms`);
     console.log(`[TIMING] Total request took ${Date.now() - totalStart}ms`);
     return res.json({
-      answer: response.data.choices[0].message.content,
-      source: 'mistral',
+      answer: aiResponse.trim(),
+      source: 'openai',
       confidence: bestMatch ? bestMatch.similarity.toFixed(2) : 0
     });
 

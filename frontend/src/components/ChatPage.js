@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import '../styles/ChatPage.css';
 
@@ -7,6 +7,13 @@ function ChatPage() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const messagesEndRef = useRef(null);
+
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -23,7 +30,7 @@ function ChatPage() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ question: userMessage }),
+        body: JSON.stringify({ question: userMessage, history: messages }),
       });
 
       const data = await response.json();
@@ -79,6 +86,7 @@ function ChatPage() {
             <div className="loading-dot"></div>
           </div>
         )}
+        <div ref={messagesEndRef} />
       </div>
 
       <div className="input-container">
