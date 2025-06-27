@@ -8,12 +8,31 @@ function ChatPage() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [displayedAssistant, setDisplayedAssistant] = useState('');
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
+  }, [messages, displayedAssistant]);
+
+  // Typewriter effect for assistant messages
+  useEffect(() => {
+    // Find the last assistant message
+    if (messages.length === 0) return;
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg.role !== 'assistant') return;
+    let i = 0;
+    setDisplayedAssistant('');
+    const interval = setInterval(() => {
+      i++;
+      setDisplayedAssistant(lastMsg.content.slice(0, i));
+      if (i >= lastMsg.content.length) {
+        clearInterval(interval);
+      }
+    }, 15); // Adjust speed here (ms per character)
+    return () => clearInterval(interval);
   }, [messages]);
 
   const handleSubmit = async (e) => {
@@ -26,7 +45,7 @@ function ChatPage() {
     setIsLoading(true);
 
     try {
-      const response = await fetch('http://localhost:5000/ask', {
+      const response = await fetch('https://tradegpt-vuqc.onrender.com/ask', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -70,20 +89,33 @@ function ChatPage() {
       </header>
 
       <div className="messages-container">
-        {messages.map((message, index) => (
-          <div
-            key={index}
-            className={`message ${message.role}`}
-          >
-            <div className="message-content">
-              {message.role === 'assistant' ? (
-                <ReactMarkdown>{message.content}</ReactMarkdown>
-              ) : (
-                message.content
-              )}
+        {messages.map((message, index) => {
+          // If this is the last assistant message, animate it
+          if (
+            message.role === 'assistant' &&
+            index === messages.length - 1
+          ) {
+            return (
+              <div key={index} className={`message ${message.role}`}>
+                <div className="message-content">
+                  <ReactMarkdown>{displayedAssistant}</ReactMarkdown>
+                </div>
+              </div>
+            );
+          }
+          // Otherwise, render normally
+          return (
+            <div key={index} className={`message ${message.role}`}>
+              <div className="message-content">
+                {message.role === 'assistant' ? (
+                  <ReactMarkdown>{message.content}</ReactMarkdown>
+                ) : (
+                  message.content
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
         {isLoading && (
           <div className="loading-indicator">
             <div className="loading-dot"></div>
