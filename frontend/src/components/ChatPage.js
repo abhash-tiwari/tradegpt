@@ -10,6 +10,7 @@ function ChatPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [displayedAssistant, setDisplayedAssistant] = useState('');
   const messagesEndRef = useRef(null);
+  const animationIntervalRef = useRef(null);
 
   useEffect(() => {
     if (messagesEndRef.current) {
@@ -17,22 +18,58 @@ function ChatPage() {
     }
   }, [messages, displayedAssistant]);
 
+  // Handle visibility change - complete animation when user returns to tab
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden && animationIntervalRef.current) {
+        // Complete the animation immediately
+        clearInterval(animationIntervalRef.current);
+        animationIntervalRef.current = null;
+        if (messages.length > 0) {
+          const lastMsg = messages[messages.length - 1];
+          if (lastMsg.role === 'assistant') {
+            setDisplayedAssistant(lastMsg.content);
+          }
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [messages]);
+
   // Typewriter effect for assistant messages
   useEffect(() => {
     // Find the last assistant message
     if (messages.length === 0) return;
     const lastMsg = messages[messages.length - 1];
     if (lastMsg.role !== 'assistant') return;
+    
     let i = 0;
     setDisplayedAssistant('');
-    const interval = setInterval(() => {
+    
+    // Clear any existing animation
+    if (animationIntervalRef.current) {
+      clearInterval(animationIntervalRef.current);
+    }
+    
+    animationIntervalRef.current = setInterval(() => {
       i++;
       setDisplayedAssistant(lastMsg.content.slice(0, i));
       if (i >= lastMsg.content.length) {
-        clearInterval(interval);
+        clearInterval(animationIntervalRef.current);
+        animationIntervalRef.current = null;
       }
-    }, 15); // Adjust speed here (ms per character)
-    return () => clearInterval(interval);
+    }, 10); // Faster speed: 5ms per character instead of 15ms
+    
+    return () => {
+      if (animationIntervalRef.current) {
+        clearInterval(animationIntervalRef.current);
+        animationIntervalRef.current = null;
+      }
+    };
   }, [messages]);
 
   const handleSubmit = async (e) => {
@@ -45,7 +82,7 @@ function ChatPage() {
     setIsLoading(true);
 
     try {
-      const response = await fetch('https://tradegpt-vuqc.onrender.com/ask', {
+      const response = await fetch('http://localhost:5000/ask', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
