@@ -133,7 +133,7 @@ router.post('/', async (req, res) => {
     console.log(`[TIMING] Similarity calculation took ${Date.now() - simStart}ms`);
 
     if (bestMatch && bestMatch.similarity >= SIMILARITY_THRESHOLD) {
-      console.log(`[TIMING] Total request took ${Date.now() - totalStart}ms`);
+      console.log('[ANSWER SOURCE] Q&A database');
       return res.json({
         answer: bestMatch.answer,
         source: 'database',
@@ -142,13 +142,80 @@ router.post('/', async (req, res) => {
       });
     }
 
+    // DocChunk retrieval logic (checked after Q&A, before AI fallback)
+    const DocChunk = require('../models/DocChunk');
+    const DOC_SIMILARITY_THRESHOLD = 0.60; // Lowered threshold for better matching
+    const docChunkPipeline = [
+      {
+        $vectorSearch: {
+          index: 'vector_index', // updated to match Atlas index name
+          path: 'embedding',
+          queryVector: queryEmbedding,
+          numCandidates: 100,
+          limit: 1,
+          similarity: 'cosine'
+        }
+      },
+      {
+        $project: {
+          text: 1,
+          similarity: { $meta: 'vectorSearchScore' }
+        }
+      }
+    ];
+    const docChunks = await DocChunk.aggregate(docChunkPipeline);
+    console.log('DocChunks returned:', docChunks);
+    const bestChunk = docChunks[0];
+    if (bestChunk) {
+      console.log('Best DocChunk similarity:', bestChunk.similarity, 'Text preview:', bestChunk.text.slice(0, 200));
+    } else {
+      console.log('No DocChunk results returned from aggregation.');
+    }
+    if (bestChunk && bestChunk.similarity >= DOC_SIMILARITY_THRESHOLD) {
+      console.log('[ANSWER SOURCE] DocChunk (document context)');
+      const systemMessage = {
+        role: 'system',
+        content: `You are TradeGPT, a trade-specific assistant for Indian export-import, logistics, and compliance.\nUse the following document context to answer the user's question:\n\n${bestChunk.text}`
+      };
+      let messagesArr = [systemMessage, { role: 'user', content: query }];
+      let aiResponse;
+      try {
+        const response = await axios.post(
+          'https://api.openai.com/v1/chat/completions',
+          {
+            model: 'gpt-4',
+            messages: messagesArr,
+            temperature: 0.3,
+            max_tokens: 512
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+        aiResponse = response.data.choices[0].message.content;
+      } catch (apiErr) {
+        console.error('AI API call failed:', apiErr);
+        return res.status(503).json({ error: 'AI service unavailable. Please try again later.' });
+      }
+      return res.json({
+        answer: aiResponse.trim(),
+        source: 'docchunk',
+        context: bestChunk.text,
+        confidence: bestChunk.similarity.toFixed(2)
+      });
+    }
+
+    // AI fallback (only if neither Q&A nor DocChunk matches)
+    console.log('[ANSWER SOURCE] AI fallback (no Q&A or docchunk match)');
     const aiStart = Date.now();
     const systemMessage = {
       role: 'system',
       content: `You are TradeGPT, a trade-specific assistant for Indian export-import, logistics, and compliance.\nYou only answer questions about: exports/imports, DGFT schemes, customs, GST, shipping, trade compliance, licensing, and trade agreements.\nFor any non-trade questions, respond: "I'm a trade-specific assistant and cannot process queries outside trade, export, import, logistics, or compliance-related topics."\nWhen answering, be detailed and thorough. Provide comprehensive explanations and examples where possible.`
     };
     let messagesArr = [systemMessage];
-    // If it's a new topic, ignore history and only send the new question
     messagesArr.push({ role: 'user', content: query });
     let aiResponse;
     try {
@@ -172,8 +239,6 @@ router.post('/', async (req, res) => {
       console.error('AI API call failed:', apiErr);
       return res.status(503).json({ error: 'AI service unavailable. Please try again later.' });
     }
-    console.log(`[TIMING] AI call took ${Date.now() - aiStart}ms`);
-    console.log(`[TIMING] Total request took ${Date.now() - totalStart}ms`);
     return res.json({
       answer: aiResponse.trim(),
       source: 'openai',
