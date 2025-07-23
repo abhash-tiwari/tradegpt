@@ -129,6 +129,9 @@ router.post('/', upload.single('pdf'), async (req, res) => {
   
   const filePath = req.file.path;
   const originalName = req.file.originalname;
+  // Reapply singleChunk and contextLine params
+  const singleChunk = req.body.singleChunk === 'true' || req.query.singleChunk === 'true';
+  const contextLine = req.body.contextLine || '';
   
   try {
     console.log(`Processing PDF: ${originalName}`);
@@ -147,15 +150,23 @@ router.post('/', upload.single('pdf'), async (req, res) => {
       .replace(/\n+/g, '\n') // Normalize line breaks
       .trim();
     
-    // Chunk the text
-    console.log('Creating text chunks...');
-    const chunks = chunkText(cleanText, 500);
+    // Chunk the text or store as single chunk
+    let chunks;
+    if (singleChunk) {
+      chunks = [contextLine ? (contextLine + '\n' + cleanText) : cleanText];
+    } else {
+      const words = cleanText.split(/\s+/).filter(word => word.length > 0);
+      chunks = [];
+      for (let i = 0; i < words.length; i += 500) {
+        const chunk = (contextLine ? (contextLine + '\n') : '') + words.slice(i, i + 500).join(' ');
+        chunks.push(chunk);
+      }
+    }
     
     // Store chunks with embeddings
     let count = 0;
     for (const chunk of chunks) {
       if (chunk.trim().length < 50) continue; // skip tiny chunks
-      
       try {
         const embedding = await getEmbedding(chunk);
         await DocChunk.create({ 
