@@ -111,12 +111,13 @@ const parsePDFWithMistralOCR = async (buffer) => {
   }
 };
 
-// Helper: chunk text into ~500 word chunks
-function chunkText(text, chunkSize = 500) {
+// Helper: chunk text into overlapping chunks
+function chunkTextWithOverlap(text, chunkSize = 700, overlap = 200, contextLine = '') {
   const words = text.split(/\s+/).filter(word => word.length > 0);
   const chunks = [];
-  for (let i = 0; i < words.length; i += chunkSize) {
-    chunks.push(words.slice(i, i + chunkSize).join(' '));
+  for (let i = 0; i < words.length; i += (chunkSize - overlap)) {
+    const chunk = (contextLine ? (contextLine + '\n') : '') + words.slice(i, i + chunkSize).join(' ');
+    chunks.push(chunk);
   }
   return chunks;
 }
@@ -155,12 +156,7 @@ router.post('/', upload.single('pdf'), async (req, res) => {
     if (singleChunk) {
       chunks = [contextLine ? (contextLine + '\n' + cleanText) : cleanText];
     } else {
-      const words = cleanText.split(/\s+/).filter(word => word.length > 0);
-      chunks = [];
-      for (let i = 0; i < words.length; i += 500) {
-        const chunk = (contextLine ? (contextLine + '\n') : '') + words.slice(i, i + 500).join(' ');
-        chunks.push(chunk);
-      }
+      chunks = chunkTextWithOverlap(cleanText, 700, 200, contextLine);
     }
     
     // Store chunks with embeddings
