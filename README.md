@@ -41,14 +41,52 @@
 
 ---
 
-## Architecture
+## Architecture ![TradeGPT Architecture](./flow.png)
 
-```User-->|Chat/Upload|Frontend
-    Frontend-->|API|Backend
-    Backend-->|Vector Search|MongoDB Atlas
-    Backend-->|Embeddings|TensorFlow.js (USE)
-    Backend-->|OCR|Mistral OCR API
-    Backend-->|AI|OpenAI GPT-4 API
+```flowchart TD
+    User["User (Web Browser)"]
+    Frontend["Frontend (React App)"]
+    API["API Layer (Express Routes)"]
+    ResponseEngine["Response Engine (RAG Logic)"]
+    VectorSearch["Vector Search Service"]
+    PDFProcessor["PDF Processing Service"]
+    MongoDB["MongoDB Atlas (Vector Search)"]
+    Embeddings["TensorFlow.js (Universal Sentence Encoder)"]
+    OCR["Mistral OCR API"]
+    OpenAI["OpenAI GPT-4 API"]
+    
+    %% User Flow
+    User -- "Ask Question" --> Frontend
+    Frontend -- "Question Request" --> API
+    
+    %% API Routes to Services
+    API -- "Process Question" --> ResponseEngine
+    API -- "Process PDF (Server-side)" --> PDFProcessor
+    
+    %% Response Engine Logic
+    ResponseEngine -- "Generate Query Embedding" --> Embeddings
+    Embeddings -- "Query Vector" --> ResponseEngine
+    ResponseEngine -- "Vector Similarity Search" --> VectorSearch
+    VectorSearch -- "Search Q&A + DocChunks" --> MongoDB
+    MongoDB -- "Similar Results" --> VectorSearch
+    VectorSearch -- "Ranked Results" --> ResponseEngine
+    
+    %% Decision Logic in Response Engine
+    ResponseEngine -- "If Good Match Found" --> ResponseEngine
+    ResponseEngine -- "If No Match (Fallback)" --> OpenAI
+    OpenAI -- "AI Generated Answer" --> ResponseEngine
+    
+    %% PDF Processing Service
+    PDFProcessor -- "Extract Text" --> OCR
+    OCR -- "Extracted Text" --> PDFProcessor
+    PDFProcessor -- "Generate Embeddings" --> Embeddings
+    Embeddings -- "Text Embeddings" --> PDFProcessor
+    PDFProcessor -- "Store Chunks" --> MongoDB
+    
+    %% Response Flow
+    ResponseEngine -- "Final Answer" --> API
+    API -- "Response" --> Frontend
+    Frontend -- "Display Answer" --> User
 ```
 
 ---
